@@ -24,6 +24,19 @@ from verl.trainer.ppo.reward import get_custom_reward_fn
 from verl.utils import hf_tokenizer
 from verl.utils.fs import copy_to_local
 
+# =========================================================
+# 【EGPO Patch】强行注入 HybridRewardLoop
+# 这一步是为了让 Ray Worker 进程知道我们的自定义类存在
+try:
+    import egpo.signals.hybrid_reward_loop
+    print(f"[EGPO/Patch] Successfully injected hybrid_reward_loop in PID: {os.getpid()}")
+except ImportError as e:
+    # 打印详细错误，方便排查 PYTHONPATH 问题
+    print(f"[EGPO/Patch] Warning: Failed to inject hybrid_reward_loop: {e}")
+    import sys
+    print(f"[EGPO/Patch] PYTHONPATH: {sys.path}")
+# =========================================================
+
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
