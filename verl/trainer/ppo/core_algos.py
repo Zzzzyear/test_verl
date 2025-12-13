@@ -1799,9 +1799,10 @@ def compute_egpo_advantage(
     input_ids: Optional[torch.Tensor] = None,
     tokenizer=None,
     **kwargs,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, dict]: # <--- 【修改】返回值增加 dict
     """
-    EGPO: Entropy-Guided Policy Optimization implementation.
+    EGPO: Entropy-Guided Policy Optimization.
+    Returns: (advantages, returns, metrics)
     """
     # 0. 参数完整性检查
     if old_log_probs is None:
@@ -1871,5 +1872,22 @@ def compute_egpo_advantage(
 
     # 6. 应用加权
     adv_final = adv * weight_expanded
-    
-    return adv_final, returns
+
+    # =================================================================
+    # 【新增】计算 Debug 指标
+    # =================================================================
+    # 使用 detach() 防止梯度泄露，mean() 计算均值
+    egpo_metrics = {
+        "egpo/weight/mean": weight.mean().detach(),
+        "egpo/weight/min": weight.min().detach(),
+        "egpo/weight/max": weight.max().detach(),
+        "egpo/weight/std": weight.std().detach(),
+        
+        "egpo/entropy/seq_mean": seq_entropy.mean().detach(), # 当前 Batch 的平均回答熵
+        "egpo/entropy/group_mean": batch_group_mean.mean().detach(), # 组内平均熵
+        
+        "egpo/ratio/mean": ratio.mean().detach(), # 原始比例 (未截断)
+        "egpo/ratio/max": ratio.max().detach(),
+    }
+    # 7. 返回 (Advantage, Returns, Metrics)
+    return adv_final, returns, egpo_metrics
