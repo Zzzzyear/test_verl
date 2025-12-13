@@ -116,6 +116,15 @@ algorithm:
     # Power used for weight scaling in "pow" method
     weight_pow: 2.0
 
+  # 【新增】EGPO Configuration 
+  egpo:
+    # Required for Hydra instantiation
+    _target_: verl.trainer.config.EgpoConfig
+    entropy_mode: answer
+    lambda_min: 0.5
+    lambda_max: 2.0
+    entropy_epsilon: 1e-6
+
 # config for the trainer
 trainer:
 
