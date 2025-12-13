@@ -33,6 +33,7 @@ from verl.trainer.config import AlgoConfig
 from verl.utils import as_torch_index, group_mean_std
 from verl.utils.import_utils import deprecated
 from verl.workers.config import ActorConfig
+from verl.utils.entropy import EntropyMaskGenerator
 
 PolicyLossFn = Callable[
     [
@@ -96,6 +97,7 @@ class AdvantageEstimator(str, Enum):
 
     GAE = "gae"
     GRPO = "grpo"
+    EGPO = "egpo"
     REINFORCE_PLUS_PLUS = "reinforce_plus_plus"
     REINFORCE_PLUS_PLUS_BASELINE = "reinforce_plus_plus_baseline"
     REMAX = "remax"
@@ -1786,3 +1788,88 @@ def compute_policy_loss_rollout_correction_wrapper(
         rollout_token_veto_threshold=rollout_token_veto_threshold,
         rollout_is_batch_normalize=rollout_is_batch_normalize,
     )
+
+@register_adv_est(AdvantageEstimator.EGPO)
+def compute_egpo_advantage(
+    token_level_rewards: torch.Tensor,
+    response_mask: torch.Tensor,
+    index: Any, # 修改类型提示，因为它可能是 Tensor 或 np.ndarray
+    config,
+    old_log_probs: Optional[torch.Tensor] = None,
+    input_ids: Optional[torch.Tensor] = None,
+    tokenizer=None,
+    **kwargs,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    EGPO: Entropy-Guided Policy Optimization implementation.
+    """
+    # 0. 参数完整性检查
+    if old_log_probs is None:
+        raise ValueError("[EGPO] 'old_log_probs' is required.")
+    if input_ids is None:
+        raise ValueError("[EGPO] 'input_ids' is required.")
+    if tokenizer is None:
+        raise ValueError("[EGPO] 'tokenizer' is required.")
+
+    # 1. 计算基础 GRPO 优势
+    adv, returns = compute_grpo_outcome_advantage(
+        token_level_rewards=token_level_rewards,
+        response_mask=response_mask,
+        index=index, # GRPO 内部能处理 numpy 或 tensor
+        norm_adv_by_std_in_grpo=True,
+        config=config
+    )
+
+    # 2. 获取配置
+    egpo_cfg = getattr(config, 'egpo', None)
+    if egpo_cfg is None:
+        from verl.trainer.config.algorithm import EgpoConfig
+        egpo_cfg = EgpoConfig()
+    
+    # 3. 计算熵
+    with torch.no_grad():
+        from verl.utils.entropy import EntropyMaskGenerator
+        
+        mask_gen = EntropyMaskGenerator(tokenizer, entropy_mode=egpo_cfg.entropy_mode)
+        entropy_mask = mask_gen.generate_mask(input_ids, response_mask)
+        
+        token_nll = -old_log_probs * entropy_mask
+        valid_counts = entropy_mask.sum(dim=-1) + 1e-8
+        seq_entropy = token_nll.sum(dim=-1) / valid_counts
+        
+        # 4. 计算组内平均熵 (Group Mean Entropy)
+        # 【修复点】安全地转换为 numpy
+        if isinstance(index, torch.Tensor):
+            index_cpu = index.cpu().numpy()
+        elif isinstance(index, np.ndarray):
+            index_cpu = index
+        else:
+            # 可能是 list，强制转 numpy
+            index_cpu = np.array(index)
+
+        # 使用 numpy.unique 获取分组信息
+        unique_indices, inverse_indices = np.unique(index_cpu, return_inverse=True)
+        
+        device = adv.device
+        group_indices = torch.tensor(inverse_indices, device=device)
+        num_groups = len(unique_indices)
+        
+        # Scatter Add 求和
+        group_sum_entropy = torch.zeros(num_groups, device=device).scatter_add_(0, group_indices, seq_entropy)
+        group_counts = torch.zeros(num_groups, device=device).scatter_add_(0, group_indices, torch.ones_like(seq_entropy))
+        group_mean_entropy = group_sum_entropy / (group_counts + 1e-8)
+        
+        # 广播回每个样本
+        batch_group_mean = group_mean_entropy[group_indices]
+        
+        # 5. 计算权重
+        epsilon = egpo_cfg.entropy_epsilon
+        ratio = batch_group_mean / (seq_entropy + epsilon)
+        weight = torch.clamp(ratio, min=egpo_cfg.lambda_min, max=egpo_cfg.lambda_max)
+        
+        weight_expanded = weight.unsqueeze(-1)
+
+    # 6. 应用加权
+    adv_final = adv * weight_expanded
+    
+    return adv_final, returns
