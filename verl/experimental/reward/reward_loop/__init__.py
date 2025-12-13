@@ -16,6 +16,7 @@ from .registry import get_reward_loop_manager_cls, register  # noqa: I001
 from .dapo import DAPORewardLoopManager
 from .naive import NaiveRewardLoopManager
 from .limited import RateLimitedRewardLoopManager
+from . import hybrid
 
 __all__ = [
     "DAPORewardLoopManager",
