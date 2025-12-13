@@ -186,8 +186,10 @@ def compute_advantage(
     num_repeat: int = 1,
     norm_adv_by_std_in_grpo: bool = True,
     config: Optional[AlgoConfig] = None,
-    tokenizer = None  # 必须添加这个参数
-) -> DataProto:
+    tokenizer = None,
+) -> tuple[DataProto, dict]: # <--- 【修改】返回类型增加 dict
+    
+    metrics = {} # 初始化空 metrics
     """Compute advantage estimates for policy optimization.
 
     This function computes advantage estimates using various estimators like GAE, GRPO, REINFORCE++, etc.
@@ -242,7 +244,7 @@ def compute_advantage(
         data.batch["returns"] = returns
     
     # 【新增】EGPO 专属特判分支
-    elif adv_estimator == 'egpo':
+    elif adv_estimator == AdvantageEstimator.EGPO:
         # 显式检查必要数据
         if "old_log_probs" not in data.batch:
             raise ValueError("[EGPO] Missing 'old_log_probs'. Ensure Actor computes it.")
@@ -251,7 +253,8 @@ def compute_advantage(
         if tokenizer is None:
             raise ValueError("[EGPO] Tokenizer is None. Check fit() calling convention.")
 
-        advantages, returns = core_algos.compute_egpo_advantage(
+        # 接收三个返回值：advantages, returns, egpo_metrics
+        advantages, returns, egpo_metrics = core_algos.compute_egpo_advantage(
             token_level_rewards=data.batch["token_level_rewards"],
             response_mask=data.batch["response_mask"],
             index=data.non_tensor_batch["uid"],
@@ -260,9 +263,12 @@ def compute_advantage(
             config=config,
             tokenizer=tokenizer
         )
+        
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
-
+        
+        # 将 EGPO 指标加入 metrics 字典
+        metrics.update(egpo_metrics)
     # 5. 通用分支 (Else) - 也要透传 tokenizer 以防万一
     else:
         adv_estimator_fn = core_algos.get_adv_estimator_fn(adv_estimator)
@@ -288,7 +294,7 @@ def compute_advantage(
         advantages, returns = adv_estimator_fn(**adv_kwargs)
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
-    return data
+    return data, metrics
 
 
 class RayPPOTrainer:
@@ -1237,7 +1243,8 @@ class RayPPOTrainer:
                             "norm_adv_by_std_in_grpo", True
                         )  # GRPO adv normalization factor
 
-                        batch = compute_advantage(
+                        # 【修改点 1】接收两个返回值：batch 和 adv_metrics
+                        batch, adv_metrics = compute_advantage(
                             batch,
                             adv_estimator=self.config.algorithm.adv_estimator,
                             gamma=self.config.algorithm.gamma,
@@ -1245,8 +1252,11 @@ class RayPPOTrainer:
                             num_repeat=self.config.actor_rollout_ref.rollout.n,
                             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
                             config=self.config.algorithm,
-                            tokenizer=self.tokenizer,  # <--- 【新增】传入 tokenizer
+                            tokenizer=self.tokenizer  # 【修改点 2】传入 tokenizer
                         )
+                        
+                        # 【修改点 3】记录指标
+                        metrics.update(adv_metrics)
 
                     # update critic
                     if self.use_critic:
