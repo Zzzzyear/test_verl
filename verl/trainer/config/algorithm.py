@@ -17,7 +17,9 @@ from typing import Any, Optional
 
 from verl.base_config import BaseConfig
 
-__all__ = ["AlgoConfig", "FilterGroupsConfig", "KLControlConfig", "RolloutCorrectionConfig"]
+# 1. 修改 __all__
+__all__ = ["AlgoConfig", "FilterGroupsConfig", "KLControlConfig", "RolloutCorrectionConfig", "EgpoConfig"]
+# __all__ = ["AlgoConfig", "FilterGroupsConfig", "KLControlConfig", "RolloutCorrectionConfig"]
 
 
 @dataclass
@@ -329,7 +331,18 @@ class RolloutCorrectionConfig(BaseConfig):
         """
         return cls(rollout_is=None, rollout_rs=None)
 
+# 2. 【新增】EgpoConfig 类 (仿照其他 Config 写法)
+@dataclass
+class EgpoConfig(BaseConfig):
+    """
+    Configuration for EGPO (Entropy-Guided Policy Optimization).
+    """
+    entropy_mode: str = "answer"  # 'answer', 'thinking', 'joint'
+    lambda_min: float = 0.5
+    lambda_max: float = 2.0
+    entropy_epsilon: float = 1e-6
 
+# 3. 修改 AlgoConfig
 @dataclass
 class AlgoConfig(BaseConfig):
     """Configuration for the algorithm.
@@ -376,3 +389,5 @@ class AlgoConfig(BaseConfig):
     # Rollout Correction: corrects off-policy issues (policy mismatch, model staleness, distribution shifts)
     # Set to None to disable, use RolloutCorrectionConfig presets (e.g., .tis(), .mis()), or pass dict
     rollout_correction: Optional[RolloutCorrectionConfig] = None
+    # 【新增】挂载 EGPO 配置
+    egpo: EgpoConfig = field(default_factory=EgpoConfig)
