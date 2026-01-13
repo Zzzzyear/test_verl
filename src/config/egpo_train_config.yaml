@@ -1,0 +1,179 @@
+# ==============================================================================
+# EGPO 训练统一配置文件
+# ==============================================================================
+# 这里的参数将覆盖 Verl 的默认配置。
+# 结构说明:
+#   - defaults: 全局通用的算法和路径配置
+#   - modes:    针对不同硬件环境 (Debug/4卡/8卡) 的显存和吞吐优化方案
+#   - tasks:    针对不同数据集 (Math/Code/Mixed/Science) 的长度和路径配置
+# ==============================================================================
+
+defaults:
+  # # 默认路径 (会被 shell 脚本的自动探测覆盖，这里只是兜底)
+  # 基础模型路径
+  model_path: "/data-store/zhaoqiannian/models/Qwen/Qwen3-1.7B"
+  
+  # 数据集根目录 (相对项目根目录)
+  data_dir: "datasets/processed"
+  # WandB 项目名称
+  wandb_project: "EGPO_Train_Unified"
+  
+  # [优化器参数]
+  # PPO 阶段的学习率通常极低 (1e-6 或 5e-7)，防止破坏 SFT 获得的推理能力
+  lr: 1e-6
+  
+  # [KL 散度控制]
+  # 我们开启 use_kl_loss 确保代码走标准 PPO 路径，但将系数设为 0.0
+  # 因为 EGPO 通过 Entropy-Guided Advantage Scaling 隐式控制策略偏移，
+  # 不需要额外的 KL 惩罚项 (这是很多近期 RLHF 工作的共识)
+  kl_loss_coef: 0.0
+  kl_loss_type: "low_var_kl"
+
+  # [EGPO 核心算法参数]
+  # 熵计算模式: "answer" (推荐) 或 "thinking"
+  # B1 实验表明 Answer Entropy 能更好地区分正确与错误
+  entropy_mode: "answer"
+  # 动态权重的截断范围 [min, max]
+  # 防止过于自信或自卑的样本产生过大的梯度，导致训练不稳定
+  lambda_min: 0.5
+  lambda_max: 2.0
+  # 防止除以零的极小值
+  entropy_epsilon: 1e-5
+
+  # [新参数] 负样本权重策略选择
+  # 可选值: 
+  #   - "original" : 原始策略
+  #   - "clamp"    : 非对称截断 (允许弱罚，禁止重罚)
+  #   - "lock_one" : 错误锁死 (答错时不使用熵缩放，强制权重为 1.0)
+  negative_weight_mode: "lock_one"  
+
+# ==============================================================================
+# 硬件模式配置 (Profiles)
+# ==============================================================================
+# 这里的配置决定了显存占用 (OOM风险) 和 训练速度
+modes:
+
+  # --- 10G 显存极限测试模式 --- 专门用于在测试服务器上跑通流程
+  debug_10g:
+    n_gpus: 1
+    micro_bs: 1         
+    mini_bs: 4          # 配合 micro_bs=1
+    rollout_n: 4
+    total_epochs: 1
+    save_freq: 10
+    test_freq: 10
+    vllm_mem: 0.2       
+    offload: true       # [关键] 开启 CPU 卸载，显存只留给计算
+
+  # --- 35GB 显存限制模式 --- 适用于 A800 (80G) 卡上只剩 <40G 空闲的情况
+  limit_35g:
+    n_gpus: 1
+    # [显存控制 1] Micro Batch Size 设为 1
+    # 6k 长度下，BS=1 产生的激活值显存约需 2-4GB
+    micro_bs: 1
+    
+    # 梯度累积，保持训练稳定性 (1 * 1 * 4 = 4)
+    mini_bs: 4
+    
+    # 采样数 (GRPO 需要)
+    rollout_n: 4
+    
+    total_epochs: 1
+    save_freq: 10
+    test_freq: 10
+    
+    # [显存控制 2] vLLM 显存比例
+    # A800 总显存 80GB。0.3 * 80GB = 24GB。
+    # 这样 vLLM 占用 24GB，留给训练的余量为 35 - 24 = 11GB (足够 1.7B 模型)
+    vllm_mem: 0.3
+    
+    # [显存控制 3] 开启 CPU 卸载
+    # 1.7B 模型参数+梯度约占 7GB。优化器状态(10GB+)会被踢到 CPU。
+    # 这样 GPU 上训练部分只占 ~7GB + 激活值。
+    offload: true  
+  
+  # --- 调试模式 (单卡) ---
+  debug:
+    n_gpus: 1
+    # [显存杀手] Micro Batch Size: 单卡单次前向传播的样本数
+    # 4096 长度下，单卡 A800 只能跑 2-4 个。设太大必 OOM。
+    micro_bs: 2
+    # [梯度质量] Mini Batch Size: 进行一次梯度下降的总样本数
+    # Mini_BS = Micro_BS * N_GPUs * Accumulation_Steps
+    # Debug 模式下设小一点 (16) 以便快速跑完 Step
+    mini_bs: 16
+    # [采样广度] Rollout N: 对每个 Prompt 采样的回复数 (GRPO要求 N>1)
+    rollout_n: 4
+    total_epochs: 1
+    save_freq: 10
+    test_freq: 10
+    # [KV Cache] vLLM 显存占用比例。Debug 模式数据少，给 45% 足够
+    vllm_mem: 0.45
+    offload: false      # 显存够用，不开卸载以提速
+  
+  # --- 标准训练 (4卡 A800) ---
+  4gpu:
+    n_gpus: 4
+    # 4卡并行，单卡压力较小，Micro BS 可提升至 8
+    micro_bs: 8
+    # 增大 Batch Size (128) 以获得更稳定的梯度估计
+    mini_bs: 128
+    # GRPO 标准配置，采样 16 个回复计算 Baseline
+    rollout_n: 16
+    total_epochs: 3
+    save_freq: 100
+    test_freq: 50
+    # 增加 vLLM 显存比例，支持更高并发的推理
+    vllm_mem: 0.55
+    offload: false      # 显存够用，不开卸载以提速
+  
+  # --- 大规模训练 (8卡 A800) ---
+  8gpu:
+    n_gpus: 8
+    micro_bs: 16
+    mini_bs: 512
+    rollout_n: 16
+    total_epochs: 5
+    save_freq: 200
+    test_freq: 100
+    vllm_mem: 0.65
+    offload: false      # 显存够用，不开卸载以提速
+
+# ==============================================================================
+# 任务差异配置 (Tasks)
+# ==============================================================================
+tasks:
+  # --- 混合任务 (主力) ---
+  mixed:
+    filename: "mixed_reasoning.parquet"
+    # 混合了代码题，Prompt 包含长测试用例，需留足空间
+    max_prompt_length: 2048
+    # 必须对齐 Benchmark 的 4k 长度，防止长 CoT 被截断
+    max_response_length: 4096
+    
+  # --- 数学专项 ---
+  math:
+    filename: "math_single.parquet"
+    # 数学题干通常很短，1024 绰绰有余
+    max_prompt_length: 1024
+    max_response_length: 4096
+    
+  # --- 代码专项 ---
+  code:
+    filename: "code_single.parquet"
+    max_prompt_length: 2048
+    max_response_length: 4096
+
+  # ---  科学专项 --- 
+  science:
+    filename: "science_single.parquet"
+    # Science 题目通常包含较长的题干（物理/化学背景描述），建议给 2048
+    max_prompt_length: 2048
+    max_response_length: 4096
+    
+  # --- 冒烟测试任务 ---
+  # 专门用于 run_dry_run_yaml.sh
+  dryrun:
+    filename: "mixed_debug.parquet" # 指向之前生成的 debug 数据
+    max_prompt_length: 512          # Debug 数据很短，省显存
+    max_response_length: 1024

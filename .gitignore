@@ -1,0 +1,80 @@
+# ===========================
+# 1. Python & System Junk
+# ===========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.ipynb_checkpoints/
+.DS_Store
+*.log
+
+# ===========================
+# 2. Environment & Secrets
+# ===========================
+# 忽略本地虚拟环境目录
+.venv
+env/
+.env
+# 忽略可能的密钥文件
+*.key
+.secrets
+
+# ===========================
+# 3. Large Artifacts (Inside Project)
+# ===========================
+# [Data] 忽略 datasets 下的所有数据文件
+datasets/*
+
+!datasets/raw/.gitkeep
+!datasets/processed/.gitkeep
+# !datasets/README.md
+
+# [Outputs] 忽略所有实验产出
+outputs/*
+outputs/checkpoints/*
+outputs/logs/*
+outputs/analysis/*
+outputs/baselines/*
+# 同理，保留目录结构
+!outputs/checkpoints/.gitkeep
+!outputs/logs/.gitkeep
+!outputs/analysis/.gitkeep
+!outputs/baselines/.gitkeep
+!outputs/README.md
+
+# [Models] 忽略所有模型权重文件（以防万一被拷贝进来）
+/models/
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.gguf
+*.onnx
+
+# ===========================
+# 4. VeRL Framework Specific
+# ===========================
+# 忽略 verl 编译产生的构建文件
+verl/build/
+verl/dist/
+verl/*.egg-info/
+
+# 忽略 ray 的临时文件
+/tmp/ray/
+session_*/
+
+# ===========================
+# 5. Logging & Cache
+# ===========================
+wandb/
+runs/
+.cache/
+*.log
+
+# ===========================
+# 6. IDE Settings
+# ===========================
+.vscode/
+.idea/
