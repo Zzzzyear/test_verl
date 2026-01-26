@@ -11,6 +11,8 @@ def main():
     parser.add_argument("--model_path", type=str, default=None)
     parser.add_argument("--project_root", type=str, required=True)
     parser.add_argument("--exp_name", type=str, required=True)
+    parser.add_argument("--nnodes", type=int, default=1)
+    
     args = parser.parse_args()
 
     # 1. 加载配置
@@ -26,7 +28,7 @@ def main():
     defaults = cfg.defaults
     mode_cfg = cfg.modes[args.mode]
     task_cfg = cfg.tasks[args.task]
-
+        
     # 2. 智能路径逻辑 (Robust Fallback)
     # 获取原始文件名 (例如 mixed_reasoning.parquet)
     raw_filename = task_cfg.filename
@@ -64,6 +66,7 @@ def main():
         f"data.train_batch_size={mode_cfg.mini_bs}",
         f"data.max_prompt_length={task_cfg.max_prompt_length}",
         f"data.max_response_length={task_cfg.max_response_length}",
+        f"data.truncation=left",
         
         f"actor_rollout_ref.model.path='{args.model_path}'",
         f"actor_rollout_ref.actor.optim.lr={defaults.lr}",
@@ -76,14 +79,17 @@ def main():
         # 动态 Offload
         f"actor_rollout_ref.actor.fsdp_config.param_offload={offload_str}",
         f"actor_rollout_ref.actor.fsdp_config.optimizer_offload={offload_str}",
-        "actor_rollout_ref.ref.fsdp_config.param_offload=True", 
+        "actor_rollout_ref.ref.fsdp_config.param_offload=False", 
         
-        f"actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu={mode_cfg.micro_bs}",
-        f"actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu={mode_cfg.micro_bs}",
+        f"actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu={mode_cfg.micro_bs*4}",
+        f"actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu={mode_cfg.micro_bs*4}",
+
         "actor_rollout_ref.rollout.tensor_model_parallel_size=1",
         "actor_rollout_ref.rollout.name=vllm",
         f"actor_rollout_ref.rollout.gpu_memory_utilization={mode_cfg.vllm_mem}",
         f"actor_rollout_ref.rollout.n={mode_cfg.rollout_n}",
+        f"actor_rollout_ref.rollout.prompt_length={task_cfg.max_prompt_length}",
+        f"actor_rollout_ref.rollout.response_length={task_cfg.max_response_length}",
         
         "algorithm.adv_estimator=egpo",
         "algorithm.use_kl_in_reward=False",
@@ -104,7 +110,7 @@ def main():
         f"trainer.experiment_name='{args.exp_name}'",
         f"trainer.default_local_dir='{ckpt_dir}'",
         f"trainer.n_gpus_per_node={mode_cfg.n_gpus}",
-        "trainer.nnodes=1",
+        f"trainer.nnodes={args.nnodes}",
         f"trainer.save_freq={mode_cfg.save_freq}",
         f"trainer.test_freq={mode_cfg.test_freq}",
         f"trainer.total_epochs={mode_cfg.total_epochs}",

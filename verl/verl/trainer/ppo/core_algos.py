@@ -1793,7 +1793,7 @@ def compute_policy_loss_rollout_correction_wrapper(
 def compute_egpo_advantage(
     token_level_rewards: torch.Tensor,
     response_mask: torch.Tensor,
-    index: Any, 
+    index: Any,
     config,
     old_log_probs: Optional[torch.Tensor] = None,
     input_ids: Optional[torch.Tensor] = None,
@@ -1802,6 +1802,11 @@ def compute_egpo_advantage(
 ) -> tuple[torch.Tensor, torch.Tensor, dict]:
     """
     EGPO: Entropy-Guided Policy Optimization.
+    Robust Version:
+      - valid-only group mean (prevents group mean contamination)
+      - NaN/Inf protection on seq_entropy & ratio
+      - response_mask dtype alignment for score calculation
+      - hard metrics to verify clamp behavior
     Returns: (advantages, returns, metrics)
     """
     # 0. 参数完整性检查
@@ -1812,121 +1817,146 @@ def compute_egpo_advantage(
     if tokenizer is None:
         raise ValueError("[EGPO] 'tokenizer' is required.")
 
-    # 1. 计算基础 GRPO 优势
+    # 1. 基础 GRPO 优势
     adv, returns = compute_grpo_outcome_advantage(
         token_level_rewards=token_level_rewards,
         response_mask=response_mask,
-        index=index, 
+        index=index,
         norm_adv_by_std_in_grpo=True,
-        config=config
+        config=config,
     )
 
     # 2. 获取配置
-    egpo_cfg = getattr(config, 'egpo', None)
+    egpo_cfg = getattr(config, "egpo", None)
     if egpo_cfg is None:
         from verl.trainer.config.algorithm import EgpoConfig
         egpo_cfg = EgpoConfig()
-    
-    # 获取负样本权重模式，默认为 'clamp' (比较安全的非对称模式)
-    # 可选值: 'original', 'clamp', 'lock_one'
+
     neg_mode = getattr(egpo_cfg, "negative_weight_mode", "clamp")
 
-    # 3. 计算熵
+    # 3. 熵 + 权重（无梯度）
     with torch.no_grad():
         from verl.utils.entropy import EntropyMaskGenerator
-        
+
         mask_gen = EntropyMaskGenerator(tokenizer, entropy_mode=egpo_cfg.entropy_mode)
         entropy_mask = mask_gen.generate_mask(input_ids, response_mask)
-        
+
+        # dtype 对齐，保证后续乘法不出类型坑
+        if entropy_mask.dtype != old_log_probs.dtype:
+            entropy_mask = entropy_mask.to(old_log_probs.dtype)
+
+        # token_nll: (bs, resp_len)
         token_nll = -old_log_probs * entropy_mask
-        valid_counts = entropy_mask.sum(dim=-1) + 1e-8
-        seq_entropy = token_nll.sum(dim=-1) / valid_counts
-        
-        # 4. 计算组内平均熵
+
+        # 每条样本用于 entropy 的 token 数
+        entropy_token_cnt = entropy_mask.sum(dim=-1)  # (bs,)
+
+        # seq_entropy: (bs,)
+        # 分母加 1e-8 防止除零（即使后面过滤 valid，也保留）
+        seq_entropy = token_nll.sum(dim=-1) / (entropy_token_cnt + 1e-8)
+
+        # ✅ 严格 valid：有 entropy token 且 seq_entropy 是 finite
+        valid = (entropy_token_cnt > 0) & torch.isfinite(seq_entropy)
+
+        # 4. 计算组内平均熵（只统计 valid，防污染）
         if isinstance(index, torch.Tensor):
-            index_cpu = index.cpu().numpy()
+            index_cpu = index.detach().cpu().numpy()
         elif isinstance(index, np.ndarray):
             index_cpu = index
         else:
             index_cpu = np.array(index)
 
         unique_indices, inverse_indices = np.unique(index_cpu, return_inverse=True)
-        
         device = adv.device
-        group_indices = torch.tensor(inverse_indices, device=device)
+        group_indices = torch.tensor(inverse_indices, device=device, dtype=torch.long)
         num_groups = len(unique_indices)
-        
-        group_sum_entropy = torch.zeros(num_groups, device=device).scatter_add_(0, group_indices, seq_entropy)
-        group_counts = torch.zeros(num_groups, device=device).scatter_add_(0, group_indices, torch.ones_like(seq_entropy))
+
+        valid_f = valid.to(seq_entropy.dtype)
+
+        group_sum_entropy = torch.zeros(num_groups, device=device, dtype=seq_entropy.dtype).scatter_add_(
+            0, group_indices, seq_entropy * valid_f
+        )
+        group_counts = torch.zeros(num_groups, device=device, dtype=seq_entropy.dtype).scatter_add_(
+            0, group_indices, valid_f
+        )
         group_mean_entropy = group_sum_entropy / (group_counts + 1e-8)
-        
-        batch_group_mean = group_mean_entropy[group_indices]
-        
-        # 5. 计算基础 EGPO 权重 (Base Weights)
-        epsilon = egpo_cfg.entropy_epsilon
+
+        batch_group_mean = group_mean_entropy[group_indices]  # (bs,)
+
+        # 5. ratio & 权重
+        epsilon = float(getattr(egpo_cfg, "entropy_epsilon", 1e-5))
         ratio = batch_group_mean / (seq_entropy + epsilon)
-        
-        # 基础权重截断 (应用于正样本，以及 original 模式下的负样本)
-        base_weight = torch.clamp(ratio, min=egpo_cfg.lambda_min, max=egpo_cfg.lambda_max)
-        
-        # ==============================================================================
-        # [多策略选择] Negative Sample Handling Strategy
-        # ==============================================================================
-        
-        # 获取 Scalar Reward (判断正负样本)
-        response_scores = token_level_rewards.sum(dim=-1)
-        is_positive = response_scores > 0  # Bool mask for Correct answers
+
+        # 兜底 A: invalid 样本 ratio = 1
+        ratio = torch.where(valid, ratio, torch.ones_like(ratio))
+        # 兜底 B: NaN/Inf ratio = 1
+        ratio = torch.where(torch.isfinite(ratio), ratio, torch.ones_like(ratio))
+
+        # 6. 正负样本判定（严格用 response_mask 过滤 padding）
+        rm_float = response_mask.to(token_level_rewards.dtype)
+        response_scores = (token_level_rewards * rm_float).sum(dim=-1)  # (bs,)
+        is_positive = response_scores > 0
+
+        # 7. 应用 Clamp 策略（你们定义的：正样本只放大，负样本只缩小）
+        lambda_max = float(egpo_cfg.lambda_max)
+        lambda_min = float(egpo_cfg.lambda_min)
+
+        # 正样本：只允许放大 -> [1, lambda_max]
+        pos_weight = torch.clamp(ratio, min=1.0, max=lambda_max)
+
+        # 负样本：只允许缩小 -> [lambda_min, 1]
+        neg_weight = torch.clamp(ratio, min=lambda_min, max=1.0)
 
         if neg_mode == "original":
-            # 策略 1: 原始模式 (Symmetric)
-            # 无论对错，都使用 base_weight。
-            # 风险: 自信的错误会导致梯度爆炸 (Destructive Update)。
-            final_weight = base_weight
-
+            # 对称（旧）模式：全局截断
+            final_weight = torch.clamp(ratio, min=lambda_min, max=lambda_max)
         elif neg_mode == "clamp":
-            # 策略 2: 非对称截断 (Asymmetric Clamp) - 【推荐】
-            # 答对: 使用 base_weight (允许 > 1.0)。
-            # 答错: 截断到 max=1.0 (允许 < 1.0 的弱罚，禁止 > 1.0 的重罚)。
-            final_weight = torch.where(
-                is_positive,
-                base_weight,
-                torch.clamp(base_weight, max=1.0)
-            )
-
+            # 非对称 clamp：正用 pos_weight，负用 neg_weight
+            final_weight = torch.where(is_positive, pos_weight, neg_weight)
         elif neg_mode == "lock_one":
-            # 策略 3: 错误锁死 (Lock to 1.0) - 【用户指定】
-            # 答对: 使用 base_weight。
-            # 答错: 强制设为 1.0 (回归标准 GRPO，不进行任何熵缩放)。
-            final_weight = torch.where(
-                is_positive,
-                base_weight,
-                torch.ones_like(base_weight)
-            )
-        
+            # 负样本锁死 1：退化为标准 GRPO（负样本不做熵缩放）
+            final_weight = torch.where(is_positive, pos_weight, torch.ones_like(ratio))
         else:
-            raise ValueError(f"[EGPO] Invalid negative_weight_mode: {neg_mode}. "
-                             f"Choose from ['original', 'clamp', 'lock_one']")
+            raise ValueError(f"[EGPO] Invalid mode: {neg_mode}. Choose from ['original','clamp','lock_one'].")
 
+        # (bs, 1) -> broadcast 到 token 维度
         weight_expanded = final_weight.unsqueeze(-1)
 
-    # 6. 应用加权
+    # 8. 应用加权
     adv_final = adv * weight_expanded
 
-    # 7. 记录 Metrics
+    # 9. 记录 Metrics（硬核监控 clamp 是否生效）
+    pos_any = bool(is_positive.any().item())
+    neg_any = bool((~is_positive).any().item())
+    valid_any = bool(valid.any().item())
+
     egpo_metrics = {
-        "egpo/enabled": 1.0,  # 给你一个“肯定会出现在日志里”的标记
-        "egpo/weight/mean": final_weight.mean().detach().item(),
-        "egpo/weight/min": final_weight.min().detach().item(),
-        "egpo/weight/max": final_weight.max().detach().item(),
-        "egpo/weight/std": final_weight.std().detach().item(),
-
-        "egpo/entropy/seq_mean": seq_entropy.mean().detach().item(),
-        "egpo/entropy/group_mean": batch_group_mean.mean().detach().item(),
-        "egpo/ratio/mean": ratio.mean().detach().item(),
-        "egpo/ratio/max": ratio.max().detach().item(),
-
-        # 直接用 python 数，不要 torch.tensor
+        "egpo/enabled": 1.0,
         "egpo/mode_id": float(["original", "clamp", "lock_one"].index(neg_mode)),
+
+        # 基础统计
+        "egpo/weight/mean": float(final_weight.mean().detach().item()),
+        "egpo/weight/std": float(final_weight.std(unbiased=False).detach().item()),
+
+        # 正负比例
+        "egpo/pos_frac": float(is_positive.float().mean().detach().item()),
+
+        # 正样本：Min 应 >= 1
+        "egpo/weight_pos/mean": float(final_weight[is_positive].mean().detach().item()) if pos_any else 0.0,
+        "egpo/weight_pos/min": float(final_weight[is_positive].min().detach().item()) if pos_any else 0.0,
+
+        # 负样本：Max 应 <= 1
+        "egpo/weight_neg/mean": float(final_weight[~is_positive].mean().detach().item()) if neg_any else 0.0,
+        "egpo/weight_neg/max": float(final_weight[~is_positive].max().detach().item()) if neg_any else 0.0,
+
+        # 熵与 Ratio 监控（只看 valid）
+        "egpo/entropy/seq_mean": float(seq_entropy[valid].mean().detach().item()) if valid_any else 0.0,
+        "egpo/entropy/group_mean": float(batch_group_mean[valid].mean().detach().item()) if valid_any else 0.0,
+        "egpo/ratio/mean": float(ratio[valid].mean().detach().item()) if valid_any else 0.0,
+        "egpo/ratio/max": float(ratio[valid].max().detach().item()) if valid_any else 0.0,
+        "egpo/valid_ratio": float(valid.float().mean().detach().item()),
     }
+
     return adv_final, returns, egpo_metrics
+
 

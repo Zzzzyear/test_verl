@@ -32,10 +32,10 @@ defaults:
   # [EGPO 核心算法参数]
   # 熵计算模式: "answer" (推荐) , "thinking", "joint"
   # B1 实验表明 Answer Entropy 能更好地区分正确与错误
-  entropy_mode: "joint"
+  entropy_mode: "answer"
   # 动态权重的截断范围 [min, max]
   # 防止过于自信或自卑的样本产生过大的梯度，导致训练不稳定
-  lambda_min: 0.5
+  lambda_min: 0.8
   lambda_max: 2.0
   # 防止除以零的极小值
   entropy_epsilon: 1e-5
@@ -115,28 +115,28 @@ modes:
   4gpu:
     n_gpus: 4
     # 4卡并行，单卡压力较小，Micro BS 可提升至 8
-    micro_bs: 8
+    micro_bs: 4
     # 增大 Batch Size (128) 以获得更稳定的梯度估计
-    mini_bs: 128
+    mini_bs: 64
     # GRPO 标准配置，采样 16 个回复计算 Baseline
     rollout_n: 16
-    total_epochs: 3
-    save_freq: 100
-    test_freq: 50
+    total_epochs: 5
+    save_freq: 40
+    test_freq: 20
     # 增加 vLLM 显存比例，支持更高并发的推理
-    vllm_mem: 0.55
+    vllm_mem: 0.8
     offload: false      # 显存够用，不开卸载以提速
   
   # --- 大规模训练 (8卡 A800) ---
   8gpu:
     n_gpus: 8
-    micro_bs: 16
-    mini_bs: 512
+    micro_bs: 2
+    mini_bs: 16
     rollout_n: 16
     total_epochs: 5
-    save_freq: 200
-    test_freq: 100
-    vllm_mem: 0.65
+    save_freq: 40
+    test_freq: 20
+    vllm_mem: 0.6
     offload: false      # 显存够用，不开卸载以提速
 
 # ==============================================================================
@@ -181,8 +181,8 @@ tasks:
   # --- open-r1-math ---
   open-r1-math:
     filename: "math_openr1_pool10k_stable_bucket_source_softcap.parquet"
-    max_prompt_length: 2048
-    max_response_length: 4096
+    max_prompt_length: 4096
+    max_response_length: 16384
 
   open-r1-math-pmtlth1024:
     filename: "math_openr1_pool10k_stable_promptle1024_bucket_source_softcap.parquet"

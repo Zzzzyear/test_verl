@@ -3,8 +3,9 @@ set -e
 
 # ================= 1. 用户配置区 (在此修改) =================
 
-# [任务] mixed | math | code | dryrun
-TASK="open-r1-math"
+# [任务] mixed | math | code | dryrun | open-r1-math-pmtlth1024
+# 你在 egpo_train_config.yaml 新增的 task：
+TASK="open-r1-math-pmtlth1024"
 
 # [模式] debug | debug_10g | 4gpu | 8gpu | limit_35g
 MODE="debug_10g"
@@ -13,16 +14,18 @@ MODE="debug_10g"
 GPU_IDS="0"
 
 # [模型] 相对路径 (相对于 ROOT_CANDIDATES)
-MODEL_REL_PATH="models/Qwen/Qwen3-1.7B"
+# 例如：
+#   models/Qwen/Qwen2.5-Math-1.5B-Instruct
+#   models/Qwen/Qwen2.5-Math-7B-Instruct
+MODEL_REL_PATH="models/Qwen/Qwen2.5-Math-1.5B-Instruct"
 
 # [Qwen3 thinking 一键开关] auto | on | off
 # - auto(默认): 仅当模型是 Qwen3 时 -> enable_thinking=True；其它模型不注入（完全不影响）
 # - on        : 对 Qwen3 强制 enable_thinking=True（非 Qwen3 也不会注入，避免影响）
 # - off       : 对 Qwen3 强制 enable_thinking=False（非 Qwen3 也不会注入，避免影响）
-THINKING_MODE="${THINKING_MODE:-off}"
+THINKING_MODE="${THINKING_MODE:-auto}"
 
 # ==========================================================
-
 
 # --- 2. 智能路径探测---
 echo "🔍 Detecting Model Path..."
@@ -79,30 +82,33 @@ export PYTHONPATH="${PROJECT_ROOT}/verl:$PYTHONPATH"
 
 # vLLM & PyTorch 性能环境变量
 export VLLM_USE_V1=1
-export VLLM_NO_USAGE_STATS=1
-export RAY_DEDUP_LOGS=0
+export VLLM_NO_USAGE_STATS=1  # 禁止 vLLM 上报统计，加快启动
+export RAY_DEDUP_LOGS=0       # 禁止 Ray 折叠重复日志，便于调试
 unset PYTORCH_CUDA_ALLOC_CONF
 export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:512"
 
+# 关键兜底：避免 vLLM 放行超长 max_model_len
+unset VLLM_ALLOW_LONG_MAX_MODEL_LEN
+
 export CUDA_VISIBLE_DEVICES="$GPU_IDS"
-NUM_VISIBLE_GPUS=$(echo $GPU_IDS | tr ',' '\n' | wc -l)
+NUM_VISIBLE_GPUS=$(echo "$GPU_IDS" | tr ',' '\n' | wc -l)
 
 
 # --- 5. 参数生成与检查 ---
 TIMESTAMP=$(date +%m%d_%H%M)
-EXP_NAME="${TASK}_${MODE}_grpo_${TIMESTAMP}"
+EXP_NAME="${TASK}_${MODE}_${TIMESTAMP}"
 LOG_DIR="$PROJECT_ROOT/outputs/logs/$EXP_NAME"
 mkdir -p "$LOG_DIR"
 
 echo "========================================================"
-echo "🚀 GRPO Launcher (vanilla baseline)"
+echo "🚀 EGPO Launcher (Qwen2.5-Math)"
 echo "========================================================"
-echo "   Task         : $TASK"
-echo "   Mode         : $MODE"
-echo "   GPUs         : $GPU_IDS (Count: $NUM_VISIBLE_GPUS)"
-echo "   Adv Estimator: grpo"
-echo "   Config       : src/config/egpo_train_config.yaml"
-echo "   Thinking     : $THINKING_MODE"
+echo "   Task        : $TASK"
+echo "   Mode        : $MODE"
+echo "   GPUs        : $GPU_IDS (Count: $NUM_VISIBLE_GPUS)"
+echo "   Model       : $MODEL_PATH"
+echo "   Config      : src/config/egpo_train_config.yaml"
+echo "   Thinking    : $THINKING_MODE"
 echo "========================================================"
 
 CMD_ARGS=$(python3 "$UTILS_SCRIPT" \
@@ -157,11 +163,12 @@ fi
 
 
 REQUIRED_GPUS=$(echo "$CMD_ARGS" | grep -o "trainer.n_gpus_per_node=[0-9]*" | cut -d= -f2)
-if [ "$NUM_VISIBLE_GPUS" -lt "$REQUIRED_GPUS" ]; then
-    echo "❌ ERROR: Mode '$MODE' requires $REQUIRED_GPUS GPUs, but you provided $NUM_VISIBLE_GPUS ($GPU_IDS)."
-    exit 1
+if [ -n "$REQUIRED_GPUS" ]; then
+  if [ "$NUM_VISIBLE_GPUS" -lt "$REQUIRED_GPUS" ]; then
+      echo "❌ ERROR: Mode '$MODE' requires $REQUIRED_GPUS GPUs, but you provided $NUM_VISIBLE_GPUS ($GPU_IDS)."
+      exit 1
+  fi
 fi
-
 
 # --- 6. 启动训练 ---
 export WANDB_PROJECT="EGPO_Unified"
@@ -169,9 +176,9 @@ export WANDB_NAME="$EXP_NAME"
 export WANDB_DIR="$LOG_DIR"
 export WANDB_MODE="online"
 
-# 记录最终执行命令（用于自证确实跑的是 GRPO）
-echo "python3 -u -m verl.trainer.main_ppo $CMD_ARGS algorithm.adv_estimator=grpo" \
-  | tee "$LOG_DIR/launch_cmd.txt"
+# 建议打开完整错误，vLLM/Ray 崩溃时能看到根因
+export HYDRA_FULL_ERROR=1
 
 echo "   > Executing Training..."
-python3 -u -m verl.trainer.main_ppo $CMD_ARGS algorithm.adv_estimator=grpo 2>&1 | tee "$LOG_DIR/train.log"
+echo "   > python3 -u -m verl.trainer.main_ppo $CMD_ARGS"
+python3 -u -m verl.trainer.main_ppo $CMD_ARGS 2>&1 | tee "$LOG_DIR/train.log"

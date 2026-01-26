@@ -4,7 +4,7 @@ set -e
 # ================= 1. 用户配置区 (在此修改) =================
 
 # [任务] mixed | math | code | dryrun
-TASK="mixed"
+TASK="open-r1-math"
 
 # [模式] debug | debug_10g | 4gpu | 8gpu | limit_35g
 MODE="debug"
@@ -14,6 +14,12 @@ GPU_IDS="0"
 
 # [模型] 相对路径 (相对于 ROOT_CANDIDATES)
 MODEL_REL_PATH="models/Qwen/Qwen3-1.7B"
+
+# [Qwen3 thinking 一键开关] auto | on | off
+# - auto(默认): 仅当模型是 Qwen3 时 -> enable_thinking=True；其它模型不注入（完全不影响）
+# - on        : 对 Qwen3 强制 enable_thinking=True（非 Qwen3 也不会注入，避免影响）
+# - off       : 对 Qwen3 强制 enable_thinking=False（非 Qwen3 也不会注入，避免影响）
+THINKING_MODE="${THINKING_MODE:-off}"
 
 # ==========================================================
 
@@ -94,6 +100,7 @@ echo "   Task        : $TASK"
 echo "   Mode        : $MODE"
 echo "   GPUs        : $GPU_IDS (Count: $NUM_VISIBLE_GPUS)"
 echo "   Config      : src/config/egpo_train_config.yaml"
+echo "   Thinking    : $THINKING_MODE"
 echo "========================================================"
 
 CMD_ARGS=$(python3 "$UTILS_SCRIPT" \
@@ -102,7 +109,51 @@ CMD_ARGS=$(python3 "$UTILS_SCRIPT" \
     --mode "$MODE" \
     --project_root "$PROJECT_ROOT" \
     --exp_name "$EXP_NAME" \
-    --model_path "$MODEL_PATH") 
+    --model_path "$MODEL_PATH")
+
+
+# --- 5.1 Qwen3 thinking 开关（最小改动：只在 CMD_ARGS 末尾追加 override） ---
+IS_QWEN3=0
+if [[ "$MODEL_PATH" == *"Qwen3"* || "$MODEL_REL_PATH" == *"Qwen3"* ]]; then
+  IS_QWEN3=1
+fi
+
+ENABLE_THINKING_OVERRIDE=""
+
+case "$THINKING_MODE" in
+  auto)
+    if [ "$IS_QWEN3" -eq 1 ]; then
+      # 用 ++ 更稳：未来如果 yaml 里预先定义了 enable_thinking，也不会报 “key already exists”
+      ENABLE_THINKING_OVERRIDE="++data.apply_chat_template_kwargs.enable_thinking=True"
+    fi
+    ;;
+  on|1|true|True)
+    if [ "$IS_QWEN3" -eq 1 ]; then
+      ENABLE_THINKING_OVERRIDE="++data.apply_chat_template_kwargs.enable_thinking=True"
+    fi
+    ;;
+  off|0|false|False)
+    if [ "$IS_QWEN3" -eq 1 ]; then
+      ENABLE_THINKING_OVERRIDE="++data.apply_chat_template_kwargs.enable_thinking=False"
+    fi
+    ;;
+  *)
+    echo "❌ ERROR: THINKING_MODE must be auto|on|off (got '$THINKING_MODE')"
+    exit 1
+    ;;
+esac
+
+if [ -n "$ENABLE_THINKING_OVERRIDE" ]; then
+  CMD_ARGS="$CMD_ARGS $ENABLE_THINKING_OVERRIDE"
+  echo "   🧠 apply_chat_template.enable_thinking -> $ENABLE_THINKING_OVERRIDE"
+else
+  if [ "$IS_QWEN3" -eq 1 ]; then
+    echo "   🧠 apply_chat_template.enable_thinking -> (no override)"
+  else
+    echo "   🧠 non-Qwen3 model detected; thinking override skipped (won't affect other models)"
+  fi
+fi
+
 
 REQUIRED_GPUS=$(echo "$CMD_ARGS" | grep -o "trainer.n_gpus_per_node=[0-9]*" | cut -d= -f2)
 if [ "$NUM_VISIBLE_GPUS" -lt "$REQUIRED_GPUS" ]; then
@@ -114,7 +165,8 @@ fi
 export WANDB_PROJECT="EGPO_Unified"
 export WANDB_NAME="$EXP_NAME"
 export WANDB_DIR="$LOG_DIR"
-export WANDB_MODE="online" 
+export WANDB_MODE="online"
 
 echo "   > Executing Training..."
+echo "   > python3 -u -m verl.trainer.main_ppo $CMD_ARGS"
 python3 -u -m verl.trainer.main_ppo $CMD_ARGS 2>&1 | tee "$LOG_DIR/train.log"

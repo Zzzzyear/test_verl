@@ -1,5 +1,15 @@
 #!/bin/bash
 set -e
+ulimit -n 1048576
+
+export NCCL_IB_TIMEOUT=22
+export NCCL_IB_TC=160
+export NCCL_NET_GDR_LEVEL=2
+export NCCL_ALGO=Ring
+export NCCL_DEBUG=INFO
+export NCCL_SOCKET_IFNAME=eth0
+export NCCL_IB_DISABLE=0
+export NCCL_P2P_DISABLE=0
 
 # ================= 1. 用户配置区 (在此修改) =================
 
@@ -7,53 +17,54 @@ set -e
 TASK="open-r1-math"
 
 # [模式] debug | debug_10g | 4gpu | 8gpu | limit_35g
-MODE="debug_10g"
+MODE="4gpu"
 
 # [显卡] 指定 GPU ID (逗号分隔), 如 "0" 或 "0,1,2,3"
-GPU_IDS="0"
+GPU_IDS="0,1,2,3"
 
-# [模型] 相对路径 (相对于 ROOT_CANDIDATES)
-MODEL_REL_PATH="models/Qwen/Qwen3-1.7B"
+# # [模型] 相对路径 (相对于 ROOT_CANDIDATES)
+# MODEL_REL_PATH="models/Qwen/Qwen3-1.7B"
 
 # [Qwen3 thinking 一键开关] auto | on | off
 # - auto(默认): 仅当模型是 Qwen3 时 -> enable_thinking=True；其它模型不注入（完全不影响）
 # - on        : 对 Qwen3 强制 enable_thinking=True（非 Qwen3 也不会注入，避免影响）
 # - off       : 对 Qwen3 强制 enable_thinking=False（非 Qwen3 也不会注入，避免影响）
-THINKING_MODE="${THINKING_MODE:-off}"
+THINKING_MODE="${THINKING_MODE:-auto}"
 
 # ==========================================================
 
-
 # --- 2. 智能路径探测---
-echo "🔍 Detecting Model Path..."
+# echo "🔍 Detecting Model Path..."
 
-ROOT_CANDIDATES=(
-    "/data-store/zhaoqiannian"  # 训练服务器
-    "/data/zhaoqn"              # 测试服务器
-)
+# ROOT_CANDIDATES=(
+#     "/data-store/zhaoqiannian"  # 训练服务器
+#     "/data/zhaoqn"              # 测试服务器
+# )
 
-DETECTED_ROOT=""
-for root in "${ROOT_CANDIDATES[@]}"; do
-    if [ -d "$root" ]; then
-        DETECTED_ROOT="$root"
-        break
-    fi
-done
+# DETECTED_ROOT=""
+# for root in "${ROOT_CANDIDATES[@]}"; do
+#     if [ -d "$root" ]; then
+#         DETECTED_ROOT="$root"
+#         break
+#     fi
+# done
 
-if [ -z "$DETECTED_ROOT" ]; then
-    echo "   ❌ Error: Could not find any known user directories!"
-    exit 1
-fi
+# if [ -z "$DETECTED_ROOT" ]; then
+#     echo "   ❌ Error: Could not find any known user directories!"
+#     exit 1
+# fi
 
-MODEL_PATH="$DETECTED_ROOT/$MODEL_REL_PATH"
+# MODEL_PATH="$DETECTED_ROOT/$MODEL_REL_PATH"
 
-if [ ! -d "$MODEL_PATH" ]; then
-    echo "   ❌ Error: Model not found at expected path: $MODEL_PATH"
-    echo "      Please check 'MODEL_REL_PATH' configuration."
-    exit 1
-fi
-echo "   ✅ Target Model: $MODEL_PATH"
+# if [ ! -d "$MODEL_PATH" ]; then
+#     echo "   ❌ Error: Model not found at expected path: $MODEL_PATH"
+#     echo "      Please check 'MODEL_REL_PATH' configuration."
+#     exit 1
+# fi
+# echo "   ✅ Target Model: $MODEL_PATH"
 
+MODEL_PATH="/opt/nas/p/achen/open_models/Qwen_Qwen3-1.7B-Base"
+MODEL_NAME="Qwen_Qwen3-1.7B-Base"
 
 # --- 3. 模式选择策略 ---
 if [ -n "$MODE" ]; then
@@ -71,7 +82,7 @@ fi
 
 # --- 4. 基础环境准备 ---
 PROJECT_ROOT="$(cd "$(dirname "$0")/../../" && pwd)"
-CONFIG_FILE="$PROJECT_ROOT/src/config/egpo_train_config.yaml"
+CONFIG_FILE="$PROJECT_ROOT/src/config/egpo_train_config_exp11_20260121.yaml"
 UTILS_SCRIPT="$PROJECT_ROOT/src/scripts/utils/generate_cmd.py"
 
 # 强制添加 verl 源码目录到 PYTHONPATH
@@ -79,8 +90,8 @@ export PYTHONPATH="${PROJECT_ROOT}/verl:$PYTHONPATH"
 
 # vLLM & PyTorch 性能环境变量
 export VLLM_USE_V1=1
-export VLLM_NO_USAGE_STATS=1
-export RAY_DEDUP_LOGS=0
+export VLLM_NO_USAGE_STATS=1  # 禁止 vLLM 上报统计，加快启动
+export RAY_DEDUP_LOGS=0       # 禁止 Ray 折叠重复日志，便于调试
 unset PYTORCH_CUDA_ALLOC_CONF
 export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:512"
 
@@ -89,20 +100,21 @@ NUM_VISIBLE_GPUS=$(echo $GPU_IDS | tr ',' '\n' | wc -l)
 
 
 # --- 5. 参数生成与检查 ---
-TIMESTAMP=$(date +%m%d_%H%M)
-EXP_NAME="${TASK}_${MODE}_grpo_${TIMESTAMP}"
+TIMESTAMP=$(TZ='Asia/Shanghai' date +%m%d_%H%M)
+EXP_NAME="${TASK}_${MODEL_NAME}_${MODE}_${TIMESTAMP}"
 LOG_DIR="$PROJECT_ROOT/outputs/logs/$EXP_NAME"
 mkdir -p "$LOG_DIR"
 
 echo "========================================================"
-echo "🚀 GRPO Launcher (vanilla baseline)"
+echo "🚀 EGPO Launcher"
 echo "========================================================"
-echo "   Task         : $TASK"
-echo "   Mode         : $MODE"
-echo "   GPUs         : $GPU_IDS (Count: $NUM_VISIBLE_GPUS)"
-echo "   Adv Estimator: grpo"
-echo "   Config       : src/config/egpo_train_config.yaml"
-echo "   Thinking     : $THINKING_MODE"
+echo "   Task        : $TASK"
+echo "   Mode        : $MODE"
+echo "   GPUs        : $GPU_IDS (Count: $NUM_VISIBLE_GPUS)"
+echo "   Config      : $CONFIG_FILE"
+echo "   PROJECT_ROOT: $PROJECT_ROOT"
+echo "   EXP_NAME    : $EXP_NAME"
+echo "   Thinking    : $THINKING_MODE"
 echo "========================================================"
 
 CMD_ARGS=$(python3 "$UTILS_SCRIPT" \
@@ -125,6 +137,7 @@ ENABLE_THINKING_OVERRIDE=""
 case "$THINKING_MODE" in
   auto)
     if [ "$IS_QWEN3" -eq 1 ]; then
+      # 用 ++ 更稳：未来如果 yaml 里预先定义了 enable_thinking，也不会报 “key already exists”
       ENABLE_THINKING_OVERRIDE="++data.apply_chat_template_kwargs.enable_thinking=True"
     fi
     ;;
@@ -162,16 +175,15 @@ if [ "$NUM_VISIBLE_GPUS" -lt "$REQUIRED_GPUS" ]; then
     exit 1
 fi
 
-
 # --- 6. 启动训练 ---
+export HYDRA_FULL_ERROR=1
+export WANDB_API_KEY=e5eabf51ce79203f59fe61312c26901ca0e24d1a
 export WANDB_PROJECT="EGPO_Unified"
+export WANDB_ENTITY="egpo-paper"
 export WANDB_NAME="$EXP_NAME"
 export WANDB_DIR="$LOG_DIR"
 export WANDB_MODE="online"
 
-# 记录最终执行命令（用于自证确实跑的是 GRPO）
-echo "python3 -u -m verl.trainer.main_ppo $CMD_ARGS algorithm.adv_estimator=grpo" \
-  | tee "$LOG_DIR/launch_cmd.txt"
-
 echo "   > Executing Training..."
-python3 -u -m verl.trainer.main_ppo $CMD_ARGS algorithm.adv_estimator=grpo 2>&1 | tee "$LOG_DIR/train.log"
+echo "   > python3 -u -m verl.trainer.main_ppo $CMD_ARGS"
+python3 -u -m verl.trainer.main_ppo $CMD_ARGS 2>&1 | tee "$LOG_DIR/train.log"

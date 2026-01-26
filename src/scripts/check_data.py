@@ -9,10 +9,8 @@ BASE_DIR = "/data/zhaoqn/workspace/EGPO"
 DATA_DIR = os.path.join(BASE_DIR, "datasets/processed")
 
 EXPECTED_FILES = {
-    "math": "math_single.parquet",
-    "code": "code_single.parquet",
-    "science": "science_single.parquet",
-    "mixed": "mixed_reasoning.parquet"
+    "openr1_pool_train": "math_openr1_pool30k_random_source_softcap_train_final.parquet",
+    "openr1_pool_val":   "math_openr1_pool30k_random_source_softcap_val_fixed.parquet"
 }
 
 # ================= 辅助工具 =================

@@ -46,6 +46,7 @@ echo "================================================================"
 # download_dataset "AI-MO/aimo-validation-aime" "AIME-2024"
 # download_dataset "opencompass/AIME2025" "AIME-2025"
 # download_dataset "Hothan/OlympiadBench" "OlympiadBench"
+download_dataset "open-r1/OpenR1-Math-220k" "OpenR1-Math"
 
 # --- Code ---
 # download_dataset "livecodebench/code_generation_lite" "LiveCodeBench"
@@ -53,8 +54,8 @@ echo "================================================================"
 # download_dataset "openai/openai_humaneval" "openai_humaneval"
 
 # --- Science ---
-download_dataset "allenai/ai2_arc" "ARC-Easy"
-download_dataset "allenai/ai2_arc" "ARC-Challenge"
+# download_dataset "allenai/ai2_arc" "ARC-Easy"
+# download_dataset "allenai/ai2_arc" "ARC-Challenge"
 
 
 # --- General ---
