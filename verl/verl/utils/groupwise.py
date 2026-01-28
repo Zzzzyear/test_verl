@@ -45,6 +45,7 @@ from typing import Any, Optional
 
 import numpy as np
 import torch
+import types
 
 from verl.utils.device import get_torch_device
 
@@ -187,6 +188,13 @@ def group_mean_std(
         count : (G,) float32
     """
     target = _resolve_device(device)
+    if target is None or isinstance(target, types.ModuleType):
+    # 兼容错误默认值（比如 target=torch 模块）
+        target = scores.device
+    elif isinstance(target, torch.Tensor):
+        target = target.device
+    # 允许 target 是 torch.device 或 "cuda:0" 这种字符串
+    
 
     scores = scores.reshape(-1).to(device=target, dtype=torch.float32)
     gidx = gidx.reshape(-1).to(device=target, dtype=torch.long)

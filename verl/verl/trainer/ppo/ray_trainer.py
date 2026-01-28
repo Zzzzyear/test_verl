@@ -269,6 +269,27 @@ def compute_advantage(
         
         # 将 EGPO 指标加入 metrics 字典
         metrics.update(egpo_metrics)
+
+    elif adv_estimator == AdvantageEstimator.EDGE_GRPO:
+        if "entropys" not in data.batch:
+            raise ValueError("[EDGE_GRPO] Missing 'entropys'. Check fit() to keep entropys until advantage.")
+
+        advantages, returns, edge_metrics = core_algos.compute_edge_grpo_advantage(
+            token_level_rewards=data.batch["token_level_rewards"],
+            response_mask=data.batch["response_mask"],
+            index=data.non_tensor_batch["uid"],
+            token_entropys=data.batch["entropys"],  # ✅ 按你实现的签名来
+            config=config,
+        )
+
+        data.batch["advantages"] = advantages
+        data.batch["returns"] = returns
+        metrics.update(edge_metrics)
+
+        # ✅ 用完就删
+        data.batch.pop("entropys", None)
+
+
     # 5. 通用分支 (Else) - 也要透传 tokenizer 以防万一
     else:
         adv_estimator_fn = core_algos.get_adv_estimator_fn(adv_estimator)
@@ -1171,16 +1192,22 @@ class RayPPOTrainer:
                     else:  # Recompute old_log_probs
                         with marked_timer("old_log_prob", timing_raw, color="blue"):
                             old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
-                            entropys = old_log_prob.batch["entropys"]
+
+                            # 取出 entropys（从 old_log_prob 里移除）
+                            entropys = old_log_prob.batch.pop("entropys")
+
                             response_masks = batch.batch["response_mask"]
                             loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
-                            entropy_agg = agg_loss(
-                                loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode
-                            )
-                            old_log_prob_metrics = {"actor/entropy": entropy_agg.detach().item()}
-                            metrics.update(old_log_prob_metrics)
-                            old_log_prob.batch.pop("entropys")
+                            entropy_agg = agg_loss(loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode)
+                            metrics.update({"actor/entropy": entropy_agg.detach().item()})
+
+                            # 仅 EDGE_GRPO 才暂存到 batch，避免无谓通信/显存占用
+                            if self.config.algorithm.adv_estimator == AdvantageEstimator.EDGE_GRPO:
+                                batch.batch["entropys"] = entropys
+
+                            # union 回 old_log_probs 等字段（entropys 已被 pop，不会再带进去）
                             batch = batch.union(old_log_prob)
+
                             if "rollout_log_probs" in batch.batch.keys():
                                 # TODO: we may want to add diff of probs too.
                                 from verl.utils.debug.metrics import calculate_debug_metrics

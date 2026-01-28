@@ -98,6 +98,7 @@ class AdvantageEstimator(str, Enum):
     GAE = "gae"
     GRPO = "grpo"
     EGPO = "egpo"
+    EDGE_GRPO = "edge_grpo"
     REINFORCE_PLUS_PLUS = "reinforce_plus_plus"
     REINFORCE_PLUS_PLUS_BASELINE = "reinforce_plus_plus_baseline"
     REMAX = "remax"
@@ -1958,5 +1959,100 @@ def compute_egpo_advantage(
     }
 
     return adv_final, returns, egpo_metrics
+
+@register_adv_est(AdvantageEstimator.EDGE_GRPO)
+def compute_edge_grpo_advantage(
+    token_level_rewards: torch.Tensor,
+    response_mask: torch.Tensor,
+    index: np.ndarray,
+    config: Optional[AlgoConfig] = None,
+    token_entropys: Optional[torch.Tensor] = None,  # (bs, T) token-level Shannon entropy
+    **kwargs,
+) -> tuple[torch.Tensor, torch.Tensor, dict]:
+    """
+    EDGE-GRPO (EDA): GRPO outcome advantage scaled by normalized policy entropy.
+
+    Paper:
+      P_i = mean_t H_t   (token Shannon entropy averaged over response tokens)
+      P_hat_i = P_i / mean_group(P)
+      A_hat_i = A_i / P_hat_i = A_i * mean_group(P) / P_i
+    """
+    assert config is not None, "AlgoConfig is required"
+
+    # ---- 0) entropy tensor compatibility ----
+    if token_entropys is None:
+        token_entropys = (
+            kwargs.get("entropys", None)
+            or kwargs.get("token_entropys", None)
+            or kwargs.get("token_entropy", None)
+            or kwargs.get("entropy", None)
+        )
+    if token_entropys is None:
+        raise ValueError(
+            "[EDGE_GRPO] token entropys not found. "
+            "Please enable actor to compute token Shannon entropy and keep it in batch (e.g., key='entropys')."
+        )
+
+    # ---- 1) base GRPO advantage ----
+    adv, ret = compute_grpo_vectorized_outcome_advantage(
+        token_level_rewards=token_level_rewards,
+        response_mask=response_mask,
+        index=index,
+        epsilon=1e-6,
+        norm_adv_by_std_in_grpo=config.get("norm_adv_by_std_in_grpo", True),
+        config=config,
+    )
+
+    # ---- 2) config ----
+    edge_cfg = getattr(config, "edge_grpo", None)
+    if edge_cfg is None:
+        from verl.trainer.config.algorithm import EdgeGrpoConfig
+        edge_cfg = EdgeGrpoConfig()
+
+    eps = float(getattr(edge_cfg, "eps", 1e-6))
+    lam_min = float(getattr(edge_cfg, "lambda_min", 0.5))
+    lam_max = float(getattr(edge_cfg, "lambda_max", 2.0))
+    weight_mode = str(getattr(edge_cfg, "weight_mode", "ratio"))
+    beta = float(getattr(edge_cfg, "beta", 1.0))
+    z_clip = float(getattr(edge_cfg, "z_clip", 3.0))
+
+    with torch.no_grad():
+        # ---- 3) response-level entropy P_i ----
+        mask = response_mask.to(token_entropys.dtype)
+        seq_len = mask.sum(dim=-1).clamp(min=1.0)
+        P_i = (token_entropys * mask).sum(dim=-1) / seq_len  # (bs,)
+
+        # ---- 4) group stats ----
+        g = as_torch_index(index, device=P_i.device)
+        mean_g, std_g, _ = group_mean_std(P_i, g, eps=eps)
+        mu = mean_g[g]
+        sigma = std_g[g].clamp(min=eps)
+
+        # ---- 5) weight ----
+        if weight_mode == "ratio":  # paper default
+            w = mu / (P_i + eps)
+        elif weight_mode == "zscore":  # optional variant
+            z = (mu - P_i) / sigma
+            z = torch.clamp(z, -z_clip, z_clip)
+            w = 1.0 + beta * z
+        else:
+            raise ValueError(f"[EDGE_GRPO] Unknown weight_mode={weight_mode}, choose ratio|zscore")
+
+        w = torch.clamp(w, lam_min, lam_max)
+
+        adv_scaled = adv * w.unsqueeze(-1)
+
+        metrics = {
+            "edge/enabled": 1.0,
+            "edge/weight_mode_id": float(["ratio", "zscore"].index(weight_mode)),
+            "edge/w_mean": float(w.mean().item()),
+            "edge/w_std": float(w.std(unbiased=False).item()),
+            "edge/P_mean": float(P_i.mean().item()),
+            "edge/P_group_mean": float(mu.mean().item()),
+        }
+
+    return adv_scaled, ret, metrics
+
+
 
 

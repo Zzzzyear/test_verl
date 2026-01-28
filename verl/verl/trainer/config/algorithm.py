@@ -18,7 +18,7 @@ from typing import Any, Optional
 from verl.base_config import BaseConfig
 
 # 1. 修改 __all__
-__all__ = ["AlgoConfig", "FilterGroupsConfig", "KLControlConfig", "RolloutCorrectionConfig", "EgpoConfig"]
+__all__ = ["AlgoConfig", "FilterGroupsConfig", "KLControlConfig", "RolloutCorrectionConfig", "EgpoConfig", "EdgeGrpoConfig"]
 # __all__ = ["AlgoConfig", "FilterGroupsConfig", "KLControlConfig", "RolloutCorrectionConfig"]
 
 
@@ -344,6 +344,19 @@ class EgpoConfig(BaseConfig):
     # 【新增】 关于负权重的配置
     negative_weight_mode: str = "clamp"
 
+@dataclass
+class EdgeGrpoConfig(BaseConfig):
+    """
+    EDGE-GRPO (EDA): scale GRPO advantage by normalized policy entropy.
+    Paper default is ratio: w = mean(P_group) / P_i
+    """
+    weight_mode: str = "ratio"   # "ratio" (paper) | "zscore" (optional)
+    beta: float = 1.0            # only for zscore
+    lambda_min: float = 0.5
+    lambda_max: float = 2.0
+    eps: float = 1e-6
+    z_clip: float = 3.0
+
 # 3. 修改 AlgoConfig
 @dataclass
 class AlgoConfig(BaseConfig):
@@ -393,3 +406,6 @@ class AlgoConfig(BaseConfig):
     rollout_correction: Optional[RolloutCorrectionConfig] = None
     # 【新增】挂载 EGPO 配置
     egpo: EgpoConfig = field(default_factory=EgpoConfig)
+    # 【新增】挂载 EDGE-GRPO 配置
+    edge_grpo: EdgeGrpoConfig = field(default_factory=EdgeGrpoConfig)
+
