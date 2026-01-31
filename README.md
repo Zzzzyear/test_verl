@@ -1,25 +1,125 @@
-## 🧪 实验记录表
-**📁 数据集地址：** [EGPO-TrainingDatasets](https://www.modelscope.cn/datasets/Zzzzyear/EGPO-TrainingDatasets)
+# Verl (Qwen3 + GRPO) 环境避坑与安装指南
 
-| ID / 状态 | 模型 / 任务 | 🧪 实验分支 & 评测进度 (Checkpoint) | ⚙️ 实验配置 | 📝 备注 & 结果 | ℹ️ 数据集 (全称) & 提出时间 |
-|:---:|:---|:---|:---|:---|:---|
-| **例**<br>✅ | Qwen3-1.7B<br>*(math)* | **原始模型**<br>✅ 已测: `例` | **lr**: 1e-6<br>**entropy_mode**: "answer"<br>**lambda_min**: 0.5<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "original" | **备注**: 原始模型<br>**补充**: 模板示例 | math_single_numina_train_final.parquet<br>01-04 15:30 |
-| **1**<br>✅ 完成 | Qwen3-1.7B<br>*(math)* | **math_8gpu-1.7b_1230_0956 (绿色)**<br>✅ 已测: `1260` (CKPT已出) | **lr**: 1e-6<br>**entropy_mode**: "answer"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "original" | **备注**: 原始模型<br>**补充**: 取1260步 | math_single_numina_train_final.parquet<br>2025-12-22 |
-| **2**<br>✅ 完成 | Qwen3-1.7B<br>*(math)* | **math_8gpu-1.7b_0110_1616 (苔绿色)**<br>🏁 TBD | **lr**: 1e-6<br>**entropy_mode**: "answer"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 原始模型<br>**补充**: 优选跑 | math_single_numina_train_final.parquet<br>2026-01-05 |
-| **3**<br>✅ 完成 | Qwen3-1.7B<br>*(math)* | **math_8gpu-1.7b_0110_1549 (肉色)**<br>🏁 TBD | **lr**: 1e-6<br>**entropy_mode**: "answer"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "lock_one" | **备注**: 原始模型<br>**补充**: 优先跑 | math_single_numina_train_final.parquet<br>2026-01-05 |
-| **4**<br>🚫 已停 | DS-R1-Distill-Qwen-1.5B<br>*(math)* | **math_8gpu-ds_1.5b_0115_2201 (灰色)**<br>✅ 已测: `660` (有提升) | **lr**: 1e-6<br>**entropy_mode**: "answer"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 可停止<br>**补充**: 优先跑 | math_openr1_pool10k_stable_bucket_source_softcap_train_final.parquet<br>2026-01-15 |
-| **5**<br>🚫 已停 | DS-R1-Distill-Qwen-1.5B<br>*(math)* | **math_8gpu-ds_1.5b_0115_2233 (蓝色)**<br>⛔ 跑不动 | **lr**: 1e-6<br>**entropy_mode**: "answer"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 1.5b跑不动Signal Rich<br>**补充**: 优先跑 | math_openr1_pool10k_signal_rich_bucket_source_softcap_train_final.parquet<br>2026-01-15 |
-| **6**<br>🚫 已停 | DS-R1-Distill-Qwen-7B<br>*(math)* | **math_8gpu-ds_7b_0115_2339 (绿色)**<br>🏁 TBD | **lr**: 1e-6<br>**entropy_mode**: "answer"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 效果一般，可停<br>**补充**: 优先跑 | math_openr1_pool10k_signal_rich_bucket_source_softcap_train_final.parquet<br>2026-01-15 |
-| **7**<br>🚫 已停 | Qwen3-4B-Base<br>*(math)* | **math_8gpu-qwen3_4b_base_0115_2344 (红色)**<br>✅ 已测: `480` (有提升) | **lr**: 1e-6<br>**entropy_mode**: "answer"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 原始模型<br>**结果**: 后续最高点过拟合性能反而下降 | math_openr1_pool10k_stable_bucket_source_softcap_train_final.parquet<br>2026-01-15 |
-| **8**<br>🚫 已停 | Qwen3-4B-Base<br>*(math)* | **math_8gpu-qwen3_4b_base_0117_1057 (紫色)**<br>🎯 **待测: `540`**<br>🎯 **待测: `1200`** | **启动脚本**: run_grpo.sh<br>**lr**: 1e-6<br>**entropy_mode**: "joint"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: Grpo对照<br>**补充**: 优先跑 | math_openr1_pool10k_stable_bucket_source_softcap_train_final.parquet<br>2026-01-15 |
-| **9**<br>🚫 已停 | Qwen3-4B-Base<br>*(math)* | **math_8gpu-qwen3_4b_base_0118_0112 (粉色)**<br>🎯 **待测: `540`**<br>🎯 **待测: `720`** | **lr**: 1e-6<br>**entropy_mode**: "joint"<br>**lambda_min**: 1.0<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 原始模型<br>**补充**: 优先跑 | math_openr1_pool10k_stable_bucket_source_softcap_train_final.parquet<br>2026-01-15 |
-| **10**<br>🚫 已停 | Qwen2.5-Math-7B-Instruct<br>*(math)* | **math_8gpu-qwen2.5_math_7b_0118_0325 (橙色)**<br>💥 梯度爆炸 | **lr**: 1e-6<br>**entropy_mode**: "joint"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 结果是梯度爆炸<br>**补充**: 优先跑 | math_openr1_pool10k_stable_bucket_source_softcap_train_final.parquet<br>2026-01-15 |
-| **11**<br>⏳ 进行中 | Qwen3-1.7B-Base<br>*(math)* | ① **math_8gpu-qwen3_1.7b_base_0121_0608 (浅绿)**<br>&nbsp;&nbsp;&nbsp;⚠️ *0120前的旧代码*<br>&nbsp;&nbsp;&nbsp;🎯 **待测: `660`**<br><br>② **open-r1-math_8gpu_0122_0027 (深绿)**<br>&nbsp;&nbsp;&nbsp;✨ *后续都是0120后的新代码*<br>&nbsp;&nbsp;&nbsp;🎯 **待测: `120`**<br><br>③  **open-r1-math_Qwen_Qwen3-1.7B-Base_4gpu_0122_1207 (棕)**<br>&nbsp;&nbsp;&nbsp;🎯 **待测: `200`**<br>&nbsp;&nbsp;&nbsp; 🎯**待测: `560`（🔧 实验可停）** | **lr**: 1e-6<br>**entropy_mode**: "joint"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 原始模型<br>**补充**: TBD | math_openr1_pool10k_stable_bucket_source_softcap_train_final.parquet<br>2026-01-20 |
-| **12**<br>⏳ 进行中 | Qwen2.5-Math-1.5B-Instruct<br>*(math)* | ① **open-r1-math-pmtlth1024_Qwen_Qwen2.5-Math-1.5B-Instruct_4gpu_0124_1103 (浅绿色)** <br>🎯 **待测: `440`（后续再测）** <br>🎯 **待测: `680`（🔧 实验可停，后续再测）**  | **启动脚本**: src/scripts/run_egpo_qwen25_math.sh<br>**lr**: 1e-6<br>**max_prompt_length**: 1024<br>**max_response_length**: 3072<br>**entropy_mode**: "joint"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 适配Ctx 4096<br>**补充**: TBD | math_openr1_pool10k_stable_promptle1024_bucket_source_softcap_train_final.parquet<br>2026-01-20 |
-| **13**<br>⏳ 进行中 | Qwen2.5-Math-1.5B<br>*(math)* | ①  **open-r1-math-pmtlth1024_Qwen_Qwen2.5-Math-1.5B_4gpu_0125_0136 (粉)**<br>&nbsp;&nbsp;&nbsp;🎯 **待测: `200`**<br>&nbsp;&nbsp;&nbsp; 🎯**待测: `720`（🔧 实验可停）** | **启动脚本**: src/scripts/run_egpo_qwen25_math.sh<br>**lr**: 1e-6<br>**max_prompt_length**: 1024<br>**max_response_length**: 3072<br>**entropy_mode**: "joint"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 适配Ctx 4096<br>**补充**: TBD | math_openr1_pool10k_stable_promptle1024_bucket_source_softcap_train_final.parquet<br>2026-01-20 |
-| **14**<br>⏳ 进行中 | Qwen3-1.7B<br>*(math)* | ① **open-r1-math_Qwen_Qwen3-1.7B_4gpu_0122_1221 (深紫)**<br>&nbsp;&nbsp;&nbsp;❌ OOM断掉<br><br>② **open-r1-math_Qwen_Qwen3-1.7B_4gpu_0122_1812 (灰)**<br>&nbsp;&nbsp;&nbsp;🎯 **待测: `120`（🔧 实验可停，后续再测）** | **lr**: 1e-6<br>**THINKING_MODE="${THINKING_MODE:-off}"**<br>**entropy_mode**: "answer"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 不开think<br>**补充**: TBD | math_openr1_pool10k_stable_bucket_source_softcap_train_final.parquet<br>2026-01-20 |
-| **15**<br>⏳ 进行中 | DS-R1-Distill-Qwen-1.5B<br>*(math)* | ① **open-r1-math_Qwen_DeepSeek-R1-Distill-Qwen-1.5B_2dist_8gpu_0122_1916 (蓝色)**<br>&nbsp;&nbsp;&nbsp;❌ OOM断掉<br><br>② **open-r1-math_deepseek-ai_DeepSeek-R1-Distill-Qwen-1.5B_4gpu_0124_0240(橙色)**<br>🎯 **待测: `260`** <br>🎯 **待测: `360`（🔧 实验可停）** | **lr**: 1e-6<br>**entropy_mode**: "answer"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 原始模型<br>**补充**: TBD | math_openr1_pool10k_stable_bucket_source_softcap_train_final.parquet<br>2026-01-20 |
-| **16**<br>⏳ 进行中 | Qwen3-8B-Base<br>*(math)* | ① **open-r1-math_Qwen_Qwen3-8B-Base_8gpu_0122_1225 (红色)** <br>🎯 **待测: `280`** <br>🎯 **待测: `500`（🔧 实验可停）** | **lr**: 1e-6<br>**entropy_mode**: "joint"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 原始模型<br>**补充**: TBD | math_openr1_pool10k_stable_bucket_source_softcap_train_final.parquet<br>2026-01-20 |
-| **17**<br>⏳ 进行中 | Qwen2.5-Math-7B-Instruct<br>*(math)* | ① **open-r1-math-pmtlth1024_Qwen_Qwen2.5-Math-7B-Instruct_4gpu_0125_1525 (浅蓝色)** <br>🎯 **待测: `280`（后续再测）** <br>🎯 **待测: `660`（🔧 实验可停，后续再测）** | **启动脚本**: src/scripts/run_egpo_qwen25_math.sh<br>**lr**: 1e-6<br>**max_prompt_length**: 1024<br>**max_response_length**: 3072<br>**entropy_mode**: "joint"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 适配Ctx 4096<br>**补充**: TBD | math_openr1_pool10k_stable_promptle1024_bucket_source_softcap_train_final.parquet<br>2026-01-20 |
-| **18**<br>⏳ 进行中 | Qwen2.5-Math-7B<br>*(math)* | ① **open-r1-math-pmtlth1024_Qwen_Qwen2.5-Math-7B_4gpu_0126_1503 (绿色)** <br>🏁 TBD | **启动脚本**: src/scripts/run_egpo_qwen25_math.sh<br>**lr**: 1e-6<br>**max_prompt_length**: 1024<br>**max_response_length**: 3072<br>**entropy_mode**: "joint"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 适配Ctx 4096<br>**补充**: TBD | math_openr1_pool10k_stable_promptle1024_bucket_source_softcap_train_final.parquet<br>2026-01-20 |
-| **19**<br>⏳ 进行中 | DS-R1-Distill-Qwen-7B<br>*(math)* | ① **open-r1-math_deepseek-ai_DeepSeek-R1-Distill-Qwen-7B_8gpu_0124_0446(紫色)**<br>🎯 **待测: `120`** <br>🎯 **待测: `380`（🔧 实验可停）** | **lr**: 1e-6<br>**entropy_mode**: "answer"<br>**lambda_min**: 0.8<br>**lambda_max**: 2.0<br>**entropy_epsilon**: 1e-5<br>**negative_weight_mode**: "clamp" | **备注**: 原始模型<br>**补充**: TBD | math_openr1_pool10k_stable_bucket_source_softcap_train_final.parquet<br>2026-01-20 |
+### 拜托 Gemini 老师总结的跑通 verl 训 qwen3 过程中遇到的困难
+本文档详细记录了在 **A800/H800** 等高性能显卡上，配置支持 **Qwen3**、**GRPO 算法** 以及 **vLLM V1 引擎** 的 Verl 训练环境的全过程。
+
+本文档包含两部分：
+1.  **踩坑复盘**：详细记录了我们在配置过程中遇到的五大核心困难及其解决方案。
+2.  **最终安装方案**：经过验证的、可直接执行的“黄金配置”脚本。
+
+---
+
+## Part 1: 困难总结与解决方案复盘
+
+#### 在配置过程中，最大的坑在于 qwen3 需要 vLLM 大于等于 0.8.5。参考某位杭州大厂人才计划大满贯落叶哥和顶A大满贯压缩哥的意见，用 vllm 0.11。
+
+我们主要遭遇了以下五大技术障碍：
+
+### 1. “依赖地狱” (Dependency Hell)
+* **现象**：`pip` 报错依赖冲突，无法解析版本。
+* **原因**：
+    * `verl` 核心代码强制要求 `numpy < 2.0`（为了兼容旧代码）。
+    * `vllm 0.11.0` 依赖 `opencv-python-headless >= 4.11`，而新版 OpenCV 强制依赖 `numpy >= 2.0`。
+    * 三者形成了版本死锁：Verl 要旧 Numpy，OpenCV 要新 Numpy，vLLM 要新 OpenCV。
+* **✅ 解决方案：强制锁定法**
+    * 我们选择**牺牲 OpenCV 的版本要求**来保全 `verl` 和 `vllm`。
+    * 操作：`pip install "numpy<2.0.0" "opencv-python-headless<4.10"`。
+    * 结果：虽然 pip 会报红色的冲突警告，但在纯文本训练（Qwen3）场景下，OpenCV 版本不匹配完全不影响 vLLM 运行。（但好像qwen3-vl是真没招了）
+
+### 2. PyTorch 与 vLLM 的版本对齐
+* **现象**：`flash-attn` 报错 `undefined symbol`（符号丢失）或 vLLM 无法启动。
+* **原因**：
+    * 手动安装的 PyTorch（如 2.5.1）与 `vllm 0.11.0` 预编译包所依赖的 PyTorch 版本（2.8.0）不一致。
+    * `flash-attn` 如果使用预编译包，往往是针对旧版 PyTorch 的，无法在 PyTorch 2.8 上运行。
+* **✅ 解决方案：跟随 vLLM 自动安装**
+    * 放弃手动指定 PyTorch 版本，直接安装 `vllm==0.11.0`，让它自动拉取匹配的 `torch==2.8.0`。
+    * **最后**再编译 `flash-attn`，确保它链接到当前环境的 PyTorch 2.8 动态库。
+
+### 3. 代码与库的“时空错位”
+* **现象**：`ImportError: cannot import name 'get_tcp_uri'` 或 `process_weights_after_loading`。
+* **原因**：
+    * 使用的 `verl 0.7.0.dev0` 是开发版代码，引用了 vLLM 极新版本（0.11+）才有的 API。
+    * 最开始尝试使用的 `vllm 0.6.3` 太旧，缺少这些函数。我们尝试修改代码（try-except），但发现缺失的组件太多，无法修补。
+* **✅ 解决方案：该升就升**
+    * 放弃兼容旧版 vLLM，直接升级到 **`vllm 0.11.0`**，彻底解决了 API 缺失问题。
+    * 同时还原 `verl` 源代码为纯净版（`git checkout .`），不再需要任何魔改补丁。
+
+
+### 4. 运行时冲突：vLLM V1 引擎 vs PyTorch (最隐蔽的坑)
+* **现象**：启动时报错 `AssertionError: Expandable segments are not compatible with memory pool` 或 `ValueError: Using V1 AsyncLLMEngine, but envs.VLLM_USE_V1=False`。
+* **原因**：
+    * `vllm 0.11` 默认启用 V1 引擎，其**内存池设计**与 PyTorch 的 `expandable_segments:True` 功能互斥。
+    * 如果禁用 V1 (`VLLM_USE_V1=0`)，`verl` 代码中硬编码的 `AsyncLLM` 类又会报错（因为它只存在于 V1）。
+* **✅ 解决方案：双向奔赴**
+    * **开启 V1**：`export VLLM_USE_V1=1`（满足 verl 代码要求）。
+    * **禁用 PyTorch 扩展段**：`unset PYTORCH_CUDA_ALLOC_CONF`（满足 vLLM V1 引擎要求）。
+
+---
+
+## Part 2: 最终成功的环境安装指南
+
+### 核心版本快照
+* **Python**: 3.11
+* **CUDA**: 12.6.1
+* **vLLM**: 0.11.0 (支持 Qwen3 FP8 修复)
+* **PyTorch**: 2.8.0 (由 vLLM 自动安装)
+* **Flash Attention**: 2.8.3 (源码编译)
+* **Numpy**: 1.26.4
+
+### 1. 初始化 Conda 环境
+```bash
+conda create -n verl1 python=3.11 -y
+conda activate verl1
+```
+### 2. 安装 CUDA 依赖 (官方源)
+为了最大化兼容 A800 性能，安装 CUDA 12.6：
+```bash
+conda install cudnn -c nvidia -y
+conda install cuda -c nvidia/label/cuda-12.6.1 -y
+```
+### 3. 安装 vLLM (核心步骤)
+直接安装 vLLM，它会自动安装匹配的 PyTorch 2.8。使用清华源加速：
+```bash
+pip install vllm==0.11.0 -i [https://pypi.tuna.tsinghua.edu.cn/simple](https://pypi.tuna.tsinghua.edu.cn/simple)
+```
+### 4. 锁定关键依赖 (解决冲突)
+Verl 需要旧版 Numpy，而 vLLM 默认会拉取新版。我们需要手动降级 Numpy 并锁定 OpenCV 版本以避免冲突。
+```bash
+# 1. 安装 verl 所需的其他依赖
+pip install transformers deepspeed accelerate datasets -i [https://pypi.tuna.tsinghua.edu.cn/simple](https://pypi.tuna.tsinghua.edu.cn/simple)
+
+# 2. 强制锁定 Numpy 和 OpenCV
+# 注意：忽略 pip 关于 vllm 依赖 opencv>=4.11 的红色报错，这是预期的。
+pip install "numpy<2.0.0" "opencv-python-headless<4.10" -i [https://pypi.tuna.tsinghua.edu.cn/simple](https://pypi.tuna.tsinghua.edu.cn/simple)
+```
+### 5. 安装 Verl 源码
+Verl 需要旧版 Numpy，而 vLLM 默认会拉取新版。我们需要手动降级 Numpy 并锁定 OpenCV 版本以避免冲突。
+```bash
+cd ~/verl
+pip install -e .
+```
+### 6. 编译 Flash Attention (最后一步)
+这一步必须最后做，确保它链接到正确的 PyTorch 2.8：
+```bash
+export MAX_JOBS=8
+pip install flash-attn==2.8.3 --no-build-isolation --no-cache-dir -i [https://pypi.tuna.tsinghua.edu.cn/simple](https://pypi.tuna.tsinghua.edu.cn/simple)
+```
+### 7. 启动脚本配置 (关键)
+在运行训练脚本（如 test_grpo_single_card.sh）时，包含以下配置以防止 vLLM V1 引擎崩溃：
+```bash
+#!/bin/bash
+
+# 1. 显式开启 vLLM V1 引擎 (Verl 代码依赖此引擎)
+export VLLM_USE_V1=1
+
+# 2. 【至关重要】禁用 PyTorch Expandable Segments
+# vLLM V1 的内存池与此功能冲突，必须彻底清除该变量
+unset PYTORCH_CUDA_ALLOC_CONF
+export PYTORCH_CUDA_ALLOC_CONF=""
+
+# 3. 指定 Attention 后端 (可选，推荐显式指定，或注释掉由 vllm 自动检测)
+# export VLLM_ATTENTION_BACKEND=FLASH_ATTN
+
+# ... 你的 python 启动命令 ...
+python3 -m verl.trainer.main_ppo ...
+```
